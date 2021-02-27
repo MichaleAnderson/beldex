@@ -56,7 +56,7 @@ target_link_libraries(wallet
     OpenSSL::Crypto
     extra)
 
-wallet_add_executable(wallet_rpc_server "wallet-wallet-rpc"
+beldex_add_executable(wallet_rpc_server "beldex-wallet-rpc"
   wallet_rpc_server.cpp
   wallet_rpc_server_commands_defs.cpp
   )
