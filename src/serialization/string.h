@@ -1,5 +1,4 @@
-// Copyright (c) 2018-2020, The Beldex Project
-// Copyright (c) 2014-2019, The Monero Project
+// Copyright (c) 2014-2018, The Monero Project
 // 
 // All rights reserved.
 // 
@@ -30,25 +29,33 @@
 // Parts of this file are originally copyright (c) 2012-2013 The Cryptonote developers
 
 #pragma once
-#include <string>
+#include <memory>
 #include "serialization.h"
 
-namespace serialization
+template <template <bool> class Archive>
+inline bool do_serialize(Archive<false>& ar, std::string& str)
 {
-
-template <class Archive>
-void serialize_value(Archive& ar, std::string& str)
-{
-  size_t size = Archive::is_serializer ? str.size() : 0;
-  varint(ar, size);
-
-  if constexpr (Archive::is_deserializer)
+  size_t size = 0;
+  ar.serialize_varint(size);
+  if (ar.remaining_bytes() < size)
   {
-    ar.remaining_bytes(size);
-    str.resize(size);
+    ar.stream().setstate(std::ios::failbit);
+    return false;
   }
 
-  ar.serialize_blob(str.data(), size);
+  std::unique_ptr<std::string::value_type[]> buf(new std::string::value_type[size]);
+  ar.serialize_blob(buf.get(), size);
+  str.erase();
+  str.append(buf.get(), size);
+  return true;
 }
 
+
+template <template <bool> class Archive>
+inline bool do_serialize(Archive<true>& ar, std::string& str)
+{
+  size_t size = str.size();
+  ar.serialize_varint(size);
+  ar.serialize_blob(const_cast<std::string::value_type*>(str.c_str()), size);
+  return true;
 }

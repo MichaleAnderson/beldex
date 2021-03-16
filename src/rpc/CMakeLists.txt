@@ -27,67 +27,59 @@
 # STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-add_library(rpc_commands
-  core_rpc_server_commands_defs.cpp
-  )
-
-add_library(rpc_server_base
+add_library(rpc_base
   rpc_args.cpp
-  http_server_base.cpp
   )
 
 add_library(rpc
-  bootstrap_daemon.cpp
   core_rpc_server.cpp
+  rpc_handler.cpp
+  )
+
+add_library(daemon_messages
+  message.cpp
+  daemon_messages.cpp
   )
 
 add_library(daemon_rpc_server
-  http_server.cpp
-  lmq_server.cpp
+  daemon_handler.cpp
+  zmq_server.cpp
   )
 
-add_library(rpc_http_client
-    http_client.cpp
-    )
-target_link_libraries(rpc_commands
+target_link_libraries(rpc_base
   PUBLIC
     common
-    cpr::cpr
-  PRIVATE
-    cryptonote_protocol
-    extra)
-
-target_link_libraries(rpc_server_base
-  PUBLIC
-    common
-    uWebSockets
+    epee
+    Boost::thread
+    Boost::program_options
+    OpenSSL::SSL
   PRIVATE
     extra)
 
 target_link_libraries(rpc
   PUBLIC
+    rpc_base
     cryptonote_core
-    rpc_commands
-    rpc_server_base
+    cryptonote_protocol
     net
     version
+    Boost::regex
   PRIVATE
+    extra)
+
+target_link_libraries(daemon_messages
+  PRIVATE
+    cryptonote_core
     cryptonote_protocol
-    Boost::thread
-    Boost::program_options
-    OpenSSL::SSL
+    version
+    serialization
     extra)
 
 target_link_libraries(daemon_rpc_server
   PRIVATE
-    rpc_server_base
     rpc
+    daemon_messages
+    serialization
+    Boost::chrono
     Boost::thread
-    extra)
-
-target_link_libraries(rpc_http_client
-  PUBLIC
-    common
-    cpr::cpr
-  PRIVATE
     extra)

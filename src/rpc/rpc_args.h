@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2019, The Monero Project
+// Copyright (c) 2014-2018, The Monero Project
 //
 // All rights reserved.
 //
@@ -28,7 +28,7 @@
 //
 #pragma once
 
-#include <optional>
+#include <boost/optional/optional.hpp>
 #include <boost/program_options/options_description.hpp>
 #include <boost/program_options/variables_map.hpp>
 #include <string>
@@ -53,26 +53,21 @@ namespace cryptonote
       const command_line::arg_descriptor<std::string> rpc_bind_ip;
       const command_line::arg_descriptor<std::string> rpc_bind_ipv6_address;
       const command_line::arg_descriptor<bool> rpc_use_ipv6;
-      const command_line::arg_descriptor<bool> rpc_ignore_ipv4;
       const command_line::arg_descriptor<std::string> rpc_login;
       const command_line::arg_descriptor<bool> confirm_external_bind;
       const command_line::arg_descriptor<std::string> rpc_access_control_origins;
-      const command_line::arg_descriptor<std::string> zmq_rpc_bind_ip;   // Deprecated & ignored
-      const command_line::arg_descriptor<std::string> zmq_rpc_bind_port; // Deprecated & ignored
     };
 
     static const char* tr(const char* str);
-    static void init_options(boost::program_options::options_description& desc, boost::program_options::options_description& hidden);
+    static void init_options(boost::program_options::options_description& desc);
 
-    //! \return Arguments specified by user.  Throws on error.
-    static rpc_args process(const boost::program_options::variables_map& vm);
+    //! \return Arguments specified by user, or `boost::none` if error
+    static boost::optional<rpc_args> process(const boost::program_options::variables_map& vm);
 
-    // std::nullopt if not explicitly specified
-    std::optional<std::string> bind_ip;
-    std::optional<std::string> bind_ipv6_address;
+    std::string bind_ip;
+    std::string bind_ipv6_address;
     bool use_ipv6;
-    bool require_ipv4;
     std::vector<std::string> access_control_origins;
-    std::optional<tools::login> login; // currently `std::nullopt` if unspecified by user
+    boost::optional<tools::login> login; // currently `boost::none` if unspecified by user
   };
 }

@@ -30,18 +30,25 @@
 
 #pragma once
 
-#include <sstream>
 #include "json_archive.h"
+#include "variant.h"
 
-namespace serialization {
+template <bool W>
+struct debug_archive : public json_archive<W> {
+  typedef typename json_archive<W>::stream_type stream_type;
 
-template<class T>
-std::string dump_json(T &v)
-{
-  std::stringstream ostr;
-  json_archive<true> oar(ostr);
-  assert(serialization::serialize(oar, v));
-  return ostr.str();
+  debug_archive(stream_type &s) : json_archive<W>(s) { }
 };
 
-} // namespace serialization
+template <class T>
+struct serializer<debug_archive<true>, T>
+{
+  static void serialize(debug_archive<true> &ar, T &v)
+  {
+    ar.begin_object();
+    ar.tag(variant_serialization_traits<debug_archive<true>, T>::get_tag());
+    serializer<json_archive<true>, T>::serialize(ar, v);
+    ar.end_object();
+    ar.stream() << std::endl;
+  }
+};

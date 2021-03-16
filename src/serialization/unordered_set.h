@@ -30,14 +30,29 @@
 
 #pragma once
 
-#include <unordered_set>
+#include <set>
 
-namespace serialization {
+template <template <bool> class Archive, class T>
+bool do_serialize(Archive<false> &ar, std::unordered_set<T> &v);
+template <template <bool> class Archive, class T>
+bool do_serialize(Archive<true> &ar, std::unordered_set<T> &v);
 
-template <class Archive, class T>
-void serialize_value(Archive& ar, std::unordered_set<T>& v)
+namespace serialization
 {
-  detail::serialize_container(ar, v);
+  namespace detail
+  {
+    template <typename T>
+    void do_add(std::unordered_set<T> &c, T &&e)
+    {
+      c.insert(std::move(e));
+    }
+  }
 }
 
-}
+#include "serialization.h"
+
+template <template <bool> class Archive, class T>
+bool do_serialize(Archive<false> &ar, std::unordered_set<T> &v) { return do_serialize_container(ar, v); }
+template <template <bool> class Archive, class T>
+bool do_serialize(Archive<true> &ar, std::unordered_set<T> &v) { return do_serialize_container(ar, v); }
+

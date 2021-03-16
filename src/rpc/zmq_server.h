@@ -1,4 +1,4 @@
-// Copyright (c) 2020, The Beldex Project
+// Copyright (c) 2016-2018, The Monero Project
 // 
 // All rights reserved.
 // 
@@ -25,49 +25,59 @@
 // INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-// 
 
 #pragma once
 
-#include "core_rpc_server.h"
-#include "cryptonote_core/blockchain.h"
-#include "oxenmq/connections.h"
+#include <boost/thread/thread.hpp>
+#include <zmq.hpp>
+#include <string>
+#include <memory>
 
-namespace oxenmq { class OxenMQ; }
+#include "common/command_line.h"
 
-namespace cryptonote { namespace rpc {
+#include "rpc_handler.h"
 
-void init_lmq_options(boost::program_options::options_description& desc);
+namespace cryptonote
+{
 
-/**
- * LMQ RPC server class.  This doesn't actually hold the OxenMQ instance--that's in
- * cryptonote_core--but it works with it to add RPC endpoints, make it listen on RPC ports, and
- * handles RPC requests.
- */
-class lmq_rpc final : public cryptonote::BlockAddedHook {
+namespace rpc
+{
 
-  enum class mempool_sub_type { all, blink };
-  struct mempool_sub {
-    std::chrono::steady_clock::time_point expiry;
-    mempool_sub_type type;
-  };
+static constexpr int DEFAULT_NUM_ZMQ_THREADS = 1;
+static constexpr int DEFAULT_RPC_RECV_TIMEOUT_MS = 1000;
 
-  struct block_sub {
-    std::chrono::steady_clock::time_point expiry;
-  };
+class ZmqServer
+{
+  public:
 
-  cryptonote::core& core_;
-  core_rpc_server& rpc_;
-  std::shared_timed_mutex subs_mutex_;
-  std::unordered_map<oxenmq::ConnectionID, mempool_sub> mempool_subs_;
-  std::unordered_map<oxenmq::ConnectionID, block_sub> block_subs_;
+    ZmqServer(RpcHandler& h);
 
-public:
-  lmq_rpc(cryptonote::core& core, core_rpc_server& rpc, const boost::program_options::variables_map& vm);
+    ~ZmqServer();
 
-  bool block_added(const block& block, const std::vector<transaction>& txs, const checkpoint_t *) override;
+    static void init_options(boost::program_options::options_description& desc);
 
-  void send_mempool_notifications(const crypto::hash& id, const transaction& tx, const std::string& blob, const tx_pool_options& opts);
+    void serve();
+
+    bool addIPCSocket(std::string address, std::string port);
+    bool addTCPSocket(std::string address, std::string port);
+
+    void run();
+    void stop();
+
+  private:
+    RpcHandler& handler;
+
+    volatile bool stop_signal;
+    volatile bool running;
+
+    zmq::context_t context;
+
+    boost::thread run_thread;
+
+    std::unique_ptr<zmq::socket_t> rep_socket;
 };
 
-}} // namespace cryptonote::rpc
+
+}  // namespace cryptonote
+
+}  // namespace rpc

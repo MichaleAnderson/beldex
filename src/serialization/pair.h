@@ -1,5 +1,4 @@
-// Copyright (c) 2018-2020, The Beldex Project
-// Copyright (c) 2014-2019, The Monero Project
+// Copyright (c) 2014-2018, The Monero Project
 // 
 // All rights reserved.
 // 
@@ -30,38 +29,68 @@
 // Parts of this file are originally copyright (c) 2012-2013 The Cryptonote developers
 
 #pragma once
-#include <utility>
+#include <memory>
 #include "serialization.h"
 
 namespace serialization
 {
-namespace detail
-{
+  namespace detail
+  {
+    template <typename Archive, class T>
+    bool serialize_pair_element(Archive& ar, T& e)
+    {
+      return ::do_serialize(ar, e);
+    }
 
-template <typename Archive, class T>
-void serialize_pair_element(Archive& ar, T& e)
-{
-  if constexpr (std::is_same_v<std::remove_cv_t<T>, uint64_t>)
-    return varint(ar, e);
-  else
-    return value(ar, e);
+    template <typename Archive>
+    bool serialize_pair_element(Archive& ar, uint64_t& e)
+    {
+      ar.serialize_varint(e);
+      return true;
+    }
+  }
 }
 
-} // namespace detail
-
-
-template <class Archive, class F, class S>
-void serialize_value(Archive& ar, std::pair<F,S>& p)
+template <template <bool> class Archive, class F, class S>
+inline bool do_serialize(Archive<false>& ar, std::pair<F,S>& p)
 {
   size_t cnt;
-  auto arr = ar.begin_array(cnt);
-  if (!Archive::is_serializer && cnt != 2)
-    throw std::runtime_error("Serialization failed: expected pair, found " + std::to_string(cnt) + " values");
+  ar.begin_array(cnt);
+  if (!ar.stream().good())
+    return false;
+  if (cnt != 2)
+    return false;
 
-  detail::serialize_pair_element(arr.element(), p.first);
-  detail::serialize_pair_element(arr.element(), p.second);
+  if (!::serialization::detail::serialize_pair_element(ar, p.first))
+    return false;
+  if (!ar.stream().good())
+    return false;
+  ar.delimit_array();
+  if (!::serialization::detail::serialize_pair_element(ar, p.second))
+    return false;
+  if (!ar.stream().good())
+    return false;
 
   ar.end_array();
+  return true;
 }
 
+template <template <bool> class Archive, class F, class S>
+inline bool do_serialize(Archive<true>& ar, std::pair<F,S>& p)
+{
+  ar.begin_array(2);
+  if (!ar.stream().good())
+    return false;
+  if(!::serialization::detail::serialize_pair_element(ar, p.first))
+    return false;
+  if (!ar.stream().good())
+    return false;
+  ar.delimit_array();
+  if(!::serialization::detail::serialize_pair_element(ar, p.second))
+    return false;
+  if (!ar.stream().good())
+    return false;
+  ar.end_array();
+  return true;
 }
+
