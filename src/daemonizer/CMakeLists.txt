@@ -30,16 +30,24 @@
 if(MSVC OR MINGW)
   add_library(daemonizer
     windows_service.cpp
+    windows_daemonizer.inl
   )
-
-  target_link_libraries(daemonizer
-    PUBLIC
-      common
-      filesystem
-      Boost::program_options
-    PRIVATE
-      extra)
 else()
-  # Do-nothing library target
-  add_library(daemonizer INTERFACE)
+  add_library(daemonizer
+    posix_fork.cpp
+    posix_daemonizer.inl
+  )
 endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  target_compile_definitions(daemonizer PRIVATE DEBUG_TMPDIR_LOG)
+endif()
+
+target_link_libraries(daemonizer
+  PUBLIC
+    common
+    Boost::chrono
+    Boost::filesystem
+    Boost::program_options
+  PRIVATE
+    extra)
