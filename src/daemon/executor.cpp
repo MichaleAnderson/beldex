@@ -26,75 +26,55 @@
 // INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Parts of this file are originally copyright (c) 2012-2013 The Cryptonote developers
 
-#pragma once
+#include "misc_log_ex.h"
 
-#include "cryptonote_protocol/cryptonote_protocol_handler.h"
-#include "p2p/net_node.h"
-#include "daemon/protocol.h"
+#include "daemon/executor.h"
+
+#include "cryptonote_config.h"
+#include "version.h"
+
+#include <string>
 
 #undef BELDEX_DEFAULT_LOG_CATEGORY
 #define BELDEX_DEFAULT_LOG_CATEGORY "daemon"
 
 namespace daemonize
 {
+  std::string const t_executor::NAME = "Beldex Daemon";
 
-class t_p2p final
-{
-private:
-  typedef cryptonote::t_cryptonote_protocol_handler<cryptonote::core> t_protocol_raw;
-  typedef nodetool::node_server<t_protocol_raw> t_node_server;
-public:
-  static void init_options(boost::program_options::options_description & option_spec)
-  {
-    t_node_server::init_options(option_spec);
-  }
-private:
-  t_node_server m_server;
-public:
-  t_p2p(
-      boost::program_options::variables_map const & vm
-    , t_protocol & protocol
+  void t_executor::init_options(
+      boost::program_options::options_description & configurable_options
     )
-    : m_server{protocol.get()}
   {
-    //initialize objects
-    MGINFO("Initializing p2p server...");
-    if (!m_server.init(vm))
-    {
-      throw std::runtime_error("Failed to initialize p2p server.");
-    }
-    MGINFO("p2p server initialized OK");
+    t_daemon::init_options(configurable_options);
   }
 
-  t_node_server & get()
+  std::string const & t_executor::name()
   {
-    return m_server;
+    return NAME;
   }
 
-  void run()
+  t_daemon t_executor::create_daemon(
+      boost::program_options::variables_map const & vm
+    )
   {
-    MGINFO("Starting p2p net loop...");
-    m_server.run();
-    MGINFO("p2p net loop stopped");
+    LOG_PRINT_L0("Beldex '" << BELDEX_RELEASE_NAME << "' (v" << BELDEX_VERSION_FULL << ") Daemonised");
+    return t_daemon{vm};
   }
 
-  void stop()
+  bool t_executor::run_non_interactive(
+      boost::program_options::variables_map const & vm
+    )
   {
-    m_server.send_stop_signal();
+    return t_daemon{vm}.run(false);
   }
 
-  ~t_p2p()
+  bool t_executor::run_interactive(
+      boost::program_options::variables_map const & vm
+    )
   {
-    MGINFO("Deinitializing p2p...");
-    try {
-      m_server.deinit();
-    } catch (...) {
-      MERROR("Failed to deinitialize p2p...");
-    }
+    return t_daemon{vm}.run(true);
   }
-};
-
 }
+

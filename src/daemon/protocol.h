@@ -31,68 +31,55 @@
 
 #pragma once
 
-#include "cryptonote_protocol/cryptonote_protocol_handler.h"
-#include "p2p/net_node.h"
-#include "daemon/protocol.h"
-
 #undef BELDEX_DEFAULT_LOG_CATEGORY
 #define BELDEX_DEFAULT_LOG_CATEGORY "daemon"
 
 namespace daemonize
 {
 
-class t_p2p final
+class t_protocol final
 {
 private:
   typedef cryptonote::t_cryptonote_protocol_handler<cryptonote::core> t_protocol_raw;
   typedef nodetool::node_server<t_protocol_raw> t_node_server;
+
+  t_protocol_raw m_protocol;
 public:
-  static void init_options(boost::program_options::options_description & option_spec)
-  {
-    t_node_server::init_options(option_spec);
-  }
-private:
-  t_node_server m_server;
-public:
-  t_p2p(
+  t_protocol(
       boost::program_options::variables_map const & vm
-    , t_protocol & protocol
+    , t_core & core, bool offline = false
     )
-    : m_server{protocol.get()}
+    : m_protocol{core.get(), nullptr, offline}
   {
-    //initialize objects
-    MGINFO("Initializing p2p server...");
-    if (!m_server.init(vm))
+    MGINFO("Initializing cryptonote protocol...");
+    if (!m_protocol.init(vm))
     {
-      throw std::runtime_error("Failed to initialize p2p server.");
+      throw std::runtime_error("Failed to initialize cryptonote protocol.");
     }
-    MGINFO("p2p server initialized OK");
+    MGINFO("Cryptonote protocol initialized OK");
   }
 
-  t_node_server & get()
+  t_protocol_raw & get()
   {
-    return m_server;
+    return m_protocol;
   }
 
-  void run()
+  void set_p2p_endpoint(
+      t_node_server & server
+    )
   {
-    MGINFO("Starting p2p net loop...");
-    m_server.run();
-    MGINFO("p2p net loop stopped");
+    m_protocol.set_p2p_endpoint(&server);
   }
 
-  void stop()
+  ~t_protocol()
   {
-    m_server.send_stop_signal();
-  }
-
-  ~t_p2p()
-  {
-    MGINFO("Deinitializing p2p...");
+    MGINFO("Stopping cryptonote protocol...");
     try {
-      m_server.deinit();
+      m_protocol.deinit();
+      m_protocol.set_p2p_endpoint(nullptr);
+      MGINFO("Cryptonote protocol stopped successfully");
     } catch (...) {
-      MERROR("Failed to deinitialize p2p...");
+      LOG_ERROR("Failed to stop cryptonote protocol!");
     }
   }
 };
