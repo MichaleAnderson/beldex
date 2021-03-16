@@ -82,6 +82,14 @@ include(CheckLinkerFlag)
 include(CheckLibraryExists)
 include(CheckFunctionExists)
 
+if (IOS)
+    INCLUDE(CmakeLists_IOS.txt)
+endif()
+
+cmake_minimum_required(VERSION 3.7)
+message(STATUS "CMake version ${CMAKE_VERSION}")
+
+
 function (add_c_flag_if_supported flag var)
   string(REPLACE "-" "_" supported ${flag}_c)
   check_c_compiler_flag(${flag} ${supported})
@@ -282,8 +290,6 @@ if(NOT MANUAL_SUBMODULES)
     if(BUILD_TESTS)
       check_submodule(external/googletest)
     endif()
-    check_submodule(external/uWebSockets uSockets)
-    check_submodule(external/ghc-filesystem)
   endif()
 endif()
 
@@ -293,9 +299,40 @@ option(PER_BLOCK_CHECKPOINT "Enables per-block checkpointing" ON)
 list(INSERT CMAKE_MODULE_PATH 0
   "${CMAKE_SOURCE_DIR}/cmake")
 
-option(BOOST_IGNORE_SYSTEM_PATHS "Ignore boost system paths for local boost installation" OFF)
+if (NOT DEFINED ENV{DEVELOPER_LOCAL_TOOLS})
+  message(STATUS "Could not find DEVELOPER_LOCAL_TOOLS in env (not required)")
+  set(BOOST_IGNORE_SYSTEM_PATHS_DEFAULT OFF)
+elseif ("$ENV{DEVELOPER_LOCAL_TOOLS}" EQUAL 1)
+  message(STATUS "Found: env DEVELOPER_LOCAL_TOOLS = 1")
+  set(BOOST_IGNORE_SYSTEM_PATHS_DEFAULT ON)
+else()
+  message(STATUS "Found: env DEVELOPER_LOCAL_TOOLS = 0")
+  set(BOOST_IGNORE_SYSTEM_PATHS_DEFAULT OFF)
+endif()
+
+message(STATUS "BOOST_IGNORE_SYSTEM_PATHS defaults to ${BOOST_IGNORE_SYSTEM_PATHS_DEFAULT}")
+option(BOOST_IGNORE_SYSTEM_PATHS "Ignore boost system paths for local boost installation" ${BOOST_IGNORE_SYSTEM_PATHS_DEFAULT})
+
+
+if (NOT DEFINED ENV{DEVELOPER_LIBUNBOUND_OLD})
+  message(STATUS "Could not find DEVELOPER_LIBUNBOUND_OLD in env (not required)")
+elseif ("$ENV{DEVELOPER_LIBUNBOUND_OLD}" EQUAL 1)
+  message(STATUS "Found: env DEVELOPER_LIBUNBOUND_OLD = 1, will use the work around")
+  add_definitions(-DDEVELOPER_LIBUNBOUND_OLD)
+elseif ("$ENV{DEVELOPER_LIBUNBOUND_OLD}" EQUAL 0)
+  message(STATUS "Found: env DEVELOPER_LIBUNBOUND_OLD = 0")
+else()
+  message(STATUS "Found: env DEVELOPER_LIBUNBOUND_OLD with bad value. Will NOT use the work around")
+endif()
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+enable_testing()
+
+option(BUILD_DOCUMENTATION "Build the Doxygen documentation." ON)
+option(BUILD_TESTS "Build tests." OFF)
+if (BUILD_TESTS)
+  add_definitions(-DUNIT_TEST)
+endif()
 
 # Check whether we're on a 32-bit or 64-bit system
 if(CMAKE_SIZEOF_VOID_P EQUAL "8")
@@ -337,7 +374,7 @@ endif()
 
 include(cmake/check_for_std_filesystem.cmake)
 
-include_directories(external/rapidjson/include src external)
+include_directories(external/rapidjson/include src contrib/epee/include external)
 
 if(APPLE)
   include_directories(SYSTEM /usr/include/malloc)
@@ -363,6 +400,7 @@ if(BUILD_STATIC_DEPS AND NOT STATIC)
 endif()
 
 option(BUILD_SHARED_LIBS "Build shared internal libraries" OFF)
+set(PIC_FLAG "-fPIC")
 
 if(MINGW)
   string(REGEX MATCH "^[^/]:/[^/]*" msys2_install_path "${CMAKE_C_COMPILER}")
@@ -383,6 +421,7 @@ if(STATIC)
   else()
     set(CMAKE_FIND_LIBRARY_SUFFIXES .a ${CMAKE_FIND_LIBRARY_SUFFIXES})
   endif()
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DZMQ_STATIC")
 endif()
 
 if(SANITIZE)
@@ -444,10 +483,21 @@ add_definition_if_library_exists(c explicit_bzero "strings.h" HAVE_EXPLICIT_BZER
 add_definition_if_function_found(strptime HAVE_STRPTIME)
 
 # Generate header for embedded translations
-add_subdirectory(translations)
+# Generate header for embedded translations, use target toolchain if depends, otherwise use the
+# lrelease and lupdate binaries from the host
+include(ExternalProject)
+ExternalProject_Add(generate_translations_header
+  SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/translations"
+  BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/translations"
+  STAMP_DIR ${LRELEASE_PATH}
+  CMAKE_ARGS -DLRELEASE_PATH=${LRELEASE_PATH}
+  INSTALL_COMMAND cmake -E echo "")
 
+if(POLICY CMP0079)
+  cmake_policy(SET CMP0079 NEW)
+endif()
+add_library(libunbound INTERFACE)
 add_library(miniupnpc INTERFACE)
-add_library(systemd INTERFACE)  # Will do nothing unless we find and enable systemd support
 
 if(NOT TARGET sodium)
 # Allow -D DOWNLOAD_SODIUM=FORCE to download without even checking for a local libsodium
@@ -475,9 +525,7 @@ endif()
 
 if (NOT BUILD_STATIC_DEPS)
   find_package(PkgConfig REQUIRED)
-  pkg_check_modules(UNBOUND libunbound REQUIRED IMPORTED_TARGET)
-  add_library(libunbound INTERFACE)
-  target_link_libraries(libunbound INTERFACE PkgConfig::UNBOUND)
+  pkg_check_modules(SODIUM libsodium>=1.0.9 IMPORTED_TARGET)
 endif()
 
 option(WITH_SYSTEMD "Attempts to link against and enable systemd daemon notification support" ON)
@@ -493,6 +541,8 @@ if (WITH_SYSTEMD AND NOT BUILD_STATIC_DEPS)
     endif()
 endif()
 
+export(TARGETS sodium NAMESPACE sodium:: FILE sodium-exports.cmake)
+install(TARGETS sodium EXPORT sodiumConfig DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
 add_subdirectory(external)
 
@@ -529,6 +579,24 @@ else()
   elseif(IOS AND ARCH STREQUAL "arm64")
     message(STATUS "IOS: Changing arch from arm64 to armv8")
     set(ARCH_FLAG "-march=armv8")
+  elseif(ANDROID AND ARCH STREQUAL "armv8-a")
+
+    # Android Hack: Ideally we would keep the hacks out of cmake and in
+    # build-all-arch.sh, but setting armv8-a+crypto too early messes with the
+    # randomx build that needs arch to be exactly "armv8-a" to include and
+    # compile with jit_compiler_a64.* files.
+
+    # This is a hack because ideally we don't want to change target
+    # architectures on behalf of users if they set a architecture explicitly.
+    # Even if the architecture doesn't support it our PoW files don't properly
+    # use preprocessors to avoid linking against +crypto extensions like
+    # vaeseq_u8.
+
+    # Instead they want to link to the functions but at run-time query the CPU
+    # feature flags and use the software implementation otherwise.
+
+    message(STATUS "Android: Changing arch from armv8")
+    set(ARCH_FLAG "-march=armv8+crypto")
   elseif(IOS AND ARCH STREQUAL "x86_64")
     message(STATUS "IOS: Changing arch from x86_64 to x86-64")
     set(ARCH_FLAG "-march=x86-64")
@@ -569,6 +637,8 @@ else()
     set(MINGW_FLAG "${MINGW_FLAG} -DWIN32_LEAN_AND_MEAN")
     set(Boost_THREADAPI win32)
     include_directories(SYSTEM src/platform/mingw)
+    # mingw doesn't support LTO (multiple definition errors at link time)
+    set(USE_LTO_DEFAULT false)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--stack,10485760")
     if(NOT BUILD_64)
       add_definitions(-DWINVER=0x0501 -D_WIN32_WINNT=0x0501)
@@ -576,6 +646,19 @@ else()
   endif()
   set(C_WARNINGS "-Waggregate-return -Wnested-externs -Wold-style-definition -Wstrict-prototypes")
   set(CXX_WARNINGS "-Wno-reorder -Wno-missing-field-initializers")
+  try_compile(STATIC_ASSERT_RES "${CMAKE_CURRENT_BINARY_DIR}/static-assert" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test-static-assert.c" COMPILE_DEFINITIONS "-std=c11")
+  if(STATIC_ASSERT_RES)
+    set(STATIC_ASSERT_FLAG "")
+  else()
+    set(STATIC_ASSERT_FLAG "-Dstatic_assert=_Static_assert")
+  endif()
+
+  try_compile(STATIC_ASSERT_CPP_RES "${CMAKE_CURRENT_BINARY_DIR}/static-assert" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test-static-assert.cpp" COMPILE_DEFINITIONS "-std=c++14")
+  if(STATIC_ASSERT_CPP_RES)
+    set(STATIC_ASSERT_CPP_FLAG "")
+  else()
+    set(STATIC_ASSERT_CPP_FLAG "-Dstatic_assert=_Static_assert")
+  endif()
 
   option(COVERAGE "Enable profiling for test coverage report" 0)
 
@@ -585,7 +668,7 @@ else()
   endif()
 
   # if those don't work for your compiler, single it out where appropriate
-  if(CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT OPENBSD)
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(C_SECURITY_FLAGS "${C_SECURITY_FLAGS} -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=1")
     set(C_SECURITY_FLAGS "${C_SECURITY_FLAGS} -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=1")
     set(CXX_SECURITY_FLAGS "${CXX_SECURITY_FLAGS} -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=1")
@@ -757,8 +840,50 @@ else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=default -DGTEST_HAS_TR1_TUPLE=0")
   endif()
 
+  set(DEBUG_FLAGS "-g3")
+  if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND NOT (CMAKE_C_COMPILER_VERSION VERSION_LESS 4.8))
+    set(DEBUG_FLAGS "${DEBUG_FLAGS} -Og ")
+  else()
+    set(DEBUG_FLAGS "${DEBUG_FLAGS} -O0 ")
+  endif()
+
   # At least some CLANGs default to not enough for monero
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ftemplate-depth=900")
+
+  if(NOT DEFINED USE_LTO_DEFAULT)
+    set(USE_LTO_DEFAULT false)
+  endif()
+  set(USE_LTO ${USE_LTO_DEFAULT} CACHE BOOL "Use Link-Time Optimization (Release mode only)")
+
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    # There is a clang bug that does not allow to compile code that uses AES-NI intrinsics if -flto is enabled, so explicitly disable
+    set(USE_LTO false)
+  endif()
+
+
+  if(USE_LTO)
+    set(RELEASE_FLAGS "${RELEASE_FLAGS} -flto")
+    if(STATIC)
+      set(RELEASE_FLAGS "${RELEASE_FLAGS} -ffat-lto-objects")
+    endif()
+    # Since gcc 4.9 the LTO format is non-standard (slim), so we need the gcc-specific ar and ranlib binaries
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.9.0) AND NOT OPENBSD AND NOT DRAGONFLY)
+      # When invoking cmake on distributions on which gcc's binaries are prefixed
+      # with an arch-specific triplet, the user must specify -DCHOST=<prefix>
+      if (DEFINED CHOST)
+        set(CMAKE_AR "${CHOST}-gcc-ar")
+        set(CMAKE_RANLIB "${CHOST}-gcc-ranlib")
+      else()
+        set(CMAKE_AR "gcc-ar")
+        set(CMAKE_RANLIB "gcc-ranlib")
+      endif()
+    endif()
+  endif()
+
+  set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} ${DEBUG_FLAGS}")
+  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${DEBUG_FLAGS}")
+  set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} ${RELEASE_FLAGS}")
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${RELEASE_FLAGS}")
 
   if(STATIC)
     # STATIC already configures most deps to be linked in statically,
@@ -793,10 +918,10 @@ if(STATIC)
 endif()
 set(Boost_USE_MULTITHREADED TRUE) # Needed for macOS, at least, and won't hurt elsewhere
 
-if(BUILD_STATIC_DEPS)
-  # StaticBuild.cmake sets Boost targets up for us
+if (WIN32)
+  find_package(Boost 1.58 QUIET REQUIRED COMPONENTS system filesystem thread date_time chrono regex serialization program_options locale)
 else()
-  find_package(Boost 1.58 QUIET REQUIRED COMPONENTS system thread serialization program_options)
+  find_package(Boost 1.58 QUIET REQUIRED COMPONENTS system filesystem thread date_time chrono regex serialization program_options)
 endif()
 
 set(CMAKE_FIND_LIBRARY_SUFFIXES ${OLD_LIB_SUFFIXES})
@@ -804,8 +929,13 @@ if(NOT Boost_FOUND)
   message(FATAL_ERROR "Could not find Boost libraries, please make sure you have installed Boost or libboost-all-dev (>=1.58) or the equivalent")
 elseif(Boost_FOUND)
   message(STATUS "Found Boost Version: ${Boost_VERSION}")
-  if (OPENSSL_VERSION VERSION_GREATER_EQUAL 1.1 AND (
-        Boost_VERSION VERSION_LESS 1.62.0 OR (Boost_VERSION VERSION_GREATER 100000 AND Boost_VERSION VERSION_LESS 106200)))
+  if (Boost_VERSION VERSION_LESS 10 AND Boost_VERSION VERSION_LESS 1.62.0 AND NOT (OPENSSL_VERSION VERSION_LESS 1.1))
+    set(BOOST_BEFORE_1_62 true)
+  endif()
+  if (NOT Boost_VERSION VERSION_LESS 10 AND Boost_VERSION VERSION_LESS 106200 AND NOT (OPENSSL_VERSION VERSION_LESS 1.1))
+    set(BOOST_BEFORE_1_62 true)
+  endif()
+  if (BOOST_BEFORE_1_62)
       message(FATAL_ERROR "Boost ${Boost_VERSION} (older than 1.62) is too old to link with OpenSSL ${OPENSSL_VERSION} (1.1 or newer) found at ${OPENSSL_INCLUDE_DIR} and ${OPENSSL_LIBRARIES}. "
                           "Update Boost or install OpenSSL 1.0 and set path to it when running cmake: "
                           "cmake -DOPENSSL_ROOT_DIR='/usr/include/openssl-1.0'")
@@ -868,8 +998,7 @@ else()
   elseif(USE_READLINE AND NOT DEPENDS)
     find_package(Readline)
     if(READLINE_FOUND AND GNU_READLINE_FOUND)
-      add_library(readline INTERFACE)
-      target_link_libraries(readline INTERFACE ${GNU_READLINE_LIBRARY})
+      target_link_libraries(readline INTERFACE ${GNU_READLINE_LIBRARY} epee_readline)
       target_include_directories(readline INTERFACE ${Readline_INCLUDE_DIR})
       target_compile_definitions(readline INTERFACE HAVE_READLINE)
       message(STATUS "Found readline library at: ${GNU_READLINE_LIBRARY}")
@@ -880,7 +1009,6 @@ else()
     find_path(Readline_INCLUDE_PATH readline/readline.h)
     find_library(Readline_LIBRARY readline)
     find_library(Terminfo_LIBRARY tinfo)
-    add_library(readline INTERFACE)
     target_link_libraries(readline INTERFACE ${Readline_LIBRARY} ${Terminfo_LIBRARY})
     target_include_directories(readline INTERFACE ${Readline_INCLUDE_PATH})
     target_compile_definitions(readline INTERFACE HAVE_READLINE)
@@ -948,90 +1076,10 @@ if(BUILD_DOCUMENTATION)
   endif()
 endif()
 
-find_package(PythonInterp)
-find_program(iwyu_tool_path NAMES iwyu_tool.py iwyu_tool)
-if (iwyu_tool_path AND PYTHONINTERP_FOUND)
-  add_custom_target(iwyu
-    COMMAND "${PYTHON_EXECUTABLE}" "${iwyu_tool_path}" -p "${CMAKE_BINARY_DIR}" -- --no_fwd_decls
-    COMMENT "Running include-what-you-use tool"
-    VERBATIM
-  )
-endif()
+# when ON - will install libwallet_merged into "lib"
+option(BUILD_GUI_DEPS "Build GUI dependencies." OFF)
 
-# Set up a `make strip_binaries` target that strips built binaries.  This depends on all
-# default-built binaries and strips them after build.  (To also build and strip debug utilities
-# there is also a `make strip_binaries_all` target.)
-get_property(beldex_exec_tgts_all GLOBAL PROPERTY beldex_executable_targets)
-set(beldex_exec_tgts "")
-set(strip_binaries "")
-set(strip_binaries_all "")
-foreach(tgt ${beldex_exec_tgts_all})
-  list(APPEND strip_binaries_all COMMAND ${CMAKE_STRIP} $<TARGET_FILE:${tgt}>)
-  # Look for a EXCLUDE_FROM_ALL property:
-  get_property(tgt_excl_all TARGET ${tgt} PROPERTY EXCLUDE_FROM_ALL)
-  # Also look for EXCLUDE_FROM_ALL on the target's source directory (this, unfortunately, is not
-  # inherited into the target itself, hence we check both).
-  get_property(tgt_dir TARGET ${tgt} PROPERTY SOURCE_DIR)
-  get_property(tgt_dir_excl_all DIRECTORY ${tgt_dir} PROPERTY EXCLUDE_FROM_ALL)
-  if (NOT tgt_excl_all AND NOT tgt_dir_excl_all)
-    list(APPEND beldex_exec_tgts ${tgt})
-    list(APPEND strip_binaries COMMAND ${CMAKE_STRIP} $<TARGET_FILE:${tgt}>)
-  endif()
-endforeach()
-add_custom_target(strip_binaries ${strip_binaries} DEPENDS ${beldex_exec_tgts})
-add_custom_target(strip_binaries_all ${strip_binaries_all} DEPENDS ${beldex_exec_tgts_all})
+# This is not nice, distribution packagers should not enable this, but depend
+# on libunbound shipped with their distribution instead
+option(INSTALL_VENDORED_LIBUNBOUND "Install libunbound binary built from source vendored with this repo." OFF)
 
-execute_process(COMMAND tar --version RESULT_VARIABLE tar_exit_code OUTPUT_VARIABLE tar_vers)
-set(git_tag "-unknown")
-if(GIT_FOUND)
-  execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD RESULT_VARIABLE ret OUTPUT_VARIABLE curr_commit OUTPUT_STRIP_TRAILING_WHITESPACE)
-  execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse stable RESULT_VARIABLE ret2 OUTPUT_VARIABLE stable_commit OUTPUT_STRIP_TRAILING_WHITESPACE)
-  if(NOT ret AND NOT ret2 AND curr_commit STREQUAL "${stable_commit}")
-    # Get the tag description; for a tagged release this will be just the tag (v1.2.3); for
-    # something following a tag this will be something like "v1.2.3-2-abcdef" for something 2
-    # commits beyond the tag, currently at commit "abcdef".
-    execute_process(COMMAND "${GIT_EXECUTABLE}" describe --tags --abbrev=6 HEAD RESULT_VARIABLE ret OUTPUT_VARIABLE tag OUTPUT_STRIP_TRAILING_WHITESPACE)
-    if(NOT ret AND tag MATCHES "v[0-9]+\\.[0-9]+\\.[0-9]+(-.*)")
-      # We're building something following a tagged release, so append the post-version git tag info
-      set(git_tag "${CMAKE_MATCH_1}")
-    else()
-      set(git_tag "") # No tag appended if we're building a tagged stable branch release
-    endif()
-  else()
-    execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse --short=9 HEAD RESULT_VARIABLE ret OUTPUT_VARIABLE commithash OUTPUT_STRIP_TRAILING_WHITESPACE)
-    if(NOT ret)
-      set(git_tag "-${commithash}")
-    endif()
-  endif()
-endif()
-
-set(tar_os ${CMAKE_SYSTEM_NAME})
-set(default_archive create_tarxz)
-if(tar_os STREQUAL "Linux")
-  set(tar_os "linux-${CMAKE_SYSTEM_PROCESSOR}")
-elseif(tar_os STREQUAL "Darwin")
-  set(tar_os "macos")
-elseif(tar_os STREQUAL "Windows")
-  if(CMAKE_CROSSCOMPILING AND ARCH_TRIPLET MATCHES i686-.*mingw)
-    set(tar_os "win-x86")
-  elseif(CMAKE_CROSSCOMPILING AND ARCH_TRIPLET MATCHES x86_64-.*mingw)
-    set(tar_os "win-x64")
-  else()
-    set(tar_os "windows") # Don't know what arch
-  endif()
-  set(default_archive create_zip) # .tar.xz files are too scary for Windows users
-endif()
-set(tar_dir "beldex-${tar_os}-${PROJECT_VERSION}${BELDEX_RELEASE_SUFFIX}${git_tag}")
-add_custom_target(create_tarxz
-  COMMAND ${CMAKE_COMMAND} -E rename bin "${tar_dir}"
-  COMMAND ${CMAKE_COMMAND} -E tar cvJ "${tar_dir}.tar.xz" -- "${tar_dir}"
-  COMMAND ${CMAKE_COMMAND} -E rename "${tar_dir}" bin
-  DEPENDS ${beldex_exec_tgts})
-
-add_custom_target(create_zip
-  COMMAND ${CMAKE_COMMAND} -E rename bin "${tar_dir}"
-  COMMAND ${CMAKE_COMMAND} -E tar cv "${tar_dir}.zip" --format=zip -- "${tar_dir}"
-  COMMAND ${CMAKE_COMMAND} -E rename "${tar_dir}" bin
-  DEPENDS ${beldex_exec_tgts})
-
-add_custom_target(create_archive DEPENDS ${default_archive})
