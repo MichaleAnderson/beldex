@@ -32,13 +32,37 @@ beldex_add_executable(simplewallet "beldex-wallet-cli"
   )
 target_link_libraries(simplewallet
   PRIVATE
-    wallet
+   wallet
     daemonizer
-    rpc_commands
+    rpc_base
+    cryptonote_core
+    cncrypto
+    common
+    mnemonics
+    ${EPEE_READLINE}
+    version
+    ${Boost_CHRONO_LIBRARY}
+    ${Boost_PROGRAM_OPTIONS_LIBRARY}
+    ${Boost_FILESYSTEM_LIBRARY}
+    ${Boost_LOCALE_LIBRARY}
+    ${ICU_LIBRARIES}
+    ${Boost_THREAD_LIBRARY}
+    ${CMAKE_THREAD_LIBS_INIT}
+    ${GNU_READLINE_LIBRARY}
+    ${EXTRA_LIBRARIES}) wallet
+    daemonizer
+    rpc_base
     cryptonote_core
     mnemonics
+    epee_readline
+    Boost::chrono
     Boost::program_options
-    filesystem
+    Boost::filesystem
+    Boost::regex
     icu
     Boost::thread
     extra)
+
+if (WIN32)
+    target_link_libraries(simplewallet PRIVATE Boost::locale)
+endif()
