@@ -31,21 +31,31 @@ beldex_add_executable(daemon "beldexd"
   command_parser_executor.cpp
   command_server.cpp
   daemon.cpp
+  executor.cpp
   main.cpp
   rpc_command_executor.cpp
   )
 target_link_libraries(daemon
   PRIVATE
-    rpc
-    rpc_http_client
+     rpc
     blockchain_db
     cryptonote_core
+    cncrypto
+    common
     p2p
     cryptonote_protocol
     daemonizer
+    serialization
     daemon_rpc_server
+    ${EPEE_READLINE}
     version
-    filesystem
-    Boost::program_options
-    systemd
-    extra)
+    ${Boost_CHRONO_LIBRARY}
+    ${Boost_FILESYSTEM_LIBRARY}
+    ${Boost_PROGRAM_OPTIONS_LIBRARY}
+    ${Boost_REGEX_LIBRARY}
+    ${Boost_SYSTEM_LIBRARY}
+    ${CMAKE_THREAD_LIBS_INIT}
+    ${ZMQ_LIB}
+    ${GNU_READLINE_LIBRARY}
+    ${EXTRA_LIBRARIES}
+    ${Blocks})
