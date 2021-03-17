@@ -539,7 +539,7 @@ if (WITH_SYSTEMD AND NOT BUILD_STATIC_DEPS)
   #  elseif(CMAKE_SYSTEM_NAME STREQUAL Linux)
   #    message(WARNING "systemd not found; building without systemd support (use -DWITH_SYSTEMD=OFF to suppress this warning)")
   #  endif()
-#endif()
+endif()
 
 export(TARGETS sodium NAMESPACE sodium:: FILE sodium-exports.cmake)
 install(TARGETS sodium EXPORT sodiumConfig DESTINATION ${CMAKE_INSTALL_LIBDIR})
