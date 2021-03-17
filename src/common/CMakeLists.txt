@@ -1,5 +1,5 @@
-# Copyright (c) 2018, The Beldex Project
-# Copyright (c) 2014-2018, The Monero Project
+# Copyright (c) 2018, The Loki Project
+# Copyright (c) 2014-2019, The Monero Project
 #
 # All rights reserved.
 #
@@ -28,34 +28,29 @@
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 add_library(common
-  aligned.c
+  base32z.cpp
   base58.cpp
-  combinator.cpp
   command_line.cpp
   dns_utils.cpp
+  download.cpp
   error.cpp
   expect.cpp
-  file.cpp
+  loki.cpp
+  util.cpp
   i18n.cpp
-  beldex.cpp
+  rules.cpp
   notify.cpp
   password.cpp
   perf_timer.cpp
   pruning.cpp
   random.cpp
-  rules.cpp
   scoped_message_writer.cpp
-  sha256sum.cpp
   spawn.cpp
-  string_util.cpp
   threadpool.cpp
-  util.cpp
-  ${PROJECT_BINARY_DIR}/translations/translation_files.cpp
-  )
-
-set_source_files_properties(${PROJECT_BINARY_DIR}/translations/translation_files.cpp PROPERTIES GENERATED 1)
-add_dependencies(common generate_translation_data)
-
+  updates.cpp
+  aligned.c
+  timings.cc
+  combinator.cpp)
 
 if (STACK_TRACE)
   target_sources(common PRIVATE stack_trace.cpp)
@@ -68,16 +63,21 @@ if (BACKCOMPAT)
   target_sources(common PRIVATE compat/glibc_compat.cpp)
 endif()
 
+add_dependencies(common generate_translations_header)
+
 target_link_libraries(common
   PUBLIC
     cncrypto
-    oxenmq::oxenmq
-    filesystem
+    lokimq::lokimq
   PRIVATE
     libunbound
+    Boost::regex
     OpenSSL::SSL
     OpenSSL::Crypto
+    epee_readline
     extra)
+
+target_include_directories(common PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/../../translations")
 
 option(STACK_TRACE "Install a hook that dumps stack on exception" OFF)
 
