@@ -29,30 +29,31 @@
 
 #include "common/dns_utils.h"
 // check local first (in the event of static or in-source compilation of libunbound)
-#include "common/string_util.h"
 #include "unbound.h"
 
-#include <chrono>
-#include <optional>
-#include <stdexcept>
-#include <cstdlib>
-#include <cstdio>
-#include "epee/misc_log_ex.h"
-#include "common/threadpool.h"
-#include "crypto/crypto.h"
+#include <stdlib.h>
+#include "include_base_utils.h"
+#include <random>
+#include <boost/thread/mutex.hpp>
+#include <boost/thread/thread.hpp>
+#include <boost/algorithm/string/join.hpp>
+#include <boost/optional.hpp>
+using namespace epee;
 
 #undef BELDEX_DEFAULT_LOG_CATEGORY
 #define BELDEX_DEFAULT_LOG_CATEGORY "net.dns"
 
-using namespace std::literals;
-static constexpr std::array DEFAULT_DNS_PUBLIC_ADDR =
+static const char *DEFAULT_DNS_PUBLIC_ADDR[] =
 {
-  "194.150.168.168"sv,    // CCC (Germany)
-  "80.67.169.40"sv,       // FDN (France)
-  "89.233.43.71"sv,       // http://censurfridns.dk (Denmark)
-  "109.69.8.51"sv,        // punCAT (Spain)
-  "193.58.251.251"sv,     // SkyDNS (Russia)
+  "194.150.168.168",    // CCC (Germany)
+  "80.67.169.40",       // FDN (France)
+  "89.233.43.71",       // http://censurfridns.dk (Denmark)
+  "109.69.8.51",        // punCAT (Spain)
+  "77.109.148.137",     // Xiala.net (Switzerland)
+  "193.58.251.251",     // SkyDNS (Russia)
 };
+
+static boost::mutex instance_lock;
 
 namespace
 {
@@ -97,12 +98,16 @@ get_builtin_cert(void)
 */
 
 /** return the built in root DS trust anchor */
-constexpr auto get_builtin_ds()
+static const char* const*
+get_builtin_ds(void)
 {
-  return std::array{
+  static const char * const ds[] =
+  {
     ". IN DS 19036 8 2 49AAC11D7B6F6446702E54A1607371607A1A41855200FD2CE1CDDE32F24E8FB5\n",
     ". IN DS 20326 8 2 E06D44B80B8F1D39A95C0B0D7C65D08458E880409BBC683457104237C7F8EC8D\n",
+    NULL
   };
+  return ds;
 }
 
 /************************************************************
@@ -114,7 +119,7 @@ constexpr auto get_builtin_ds()
 namespace tools
 {
 
-static constexpr const char *get_record_name(int record_type)
+static const char *get_record_name(int record_type)
 {
   switch (record_type)
   {
@@ -126,12 +131,12 @@ static constexpr const char *get_record_name(int record_type)
 }
 
 // fuck it, I'm tired of dealing with getnameinfo()/inet_ntop/etc
-std::optional<std::string> ipv4_to_string(const char* src, size_t len)
+boost::optional<std::string> ipv4_to_string(const char* src, size_t len)
 {
   if (len < 4)
   {
     MERROR("Invalid IPv4 address: " << std::string(src, len));
-    return std::nullopt;
+    return boost::none;
   }
 
   std::stringstream ss;
@@ -150,12 +155,12 @@ std::optional<std::string> ipv4_to_string(const char* src, size_t len)
 
 // this obviously will need to change, but is here to reflect the above
 // stop-gap measure and to make the tests pass at least...
-std::optional<std::string> ipv6_to_string(const char* src, size_t len)
+boost::optional<std::string> ipv6_to_string(const char* src, size_t len)
 {
   if (len < 8)
   {
     MERROR("Invalid IPv4 address: " << std::string(src, len));
-    return std::nullopt;
+    return boost::none;
   }
 
   std::stringstream ss;
@@ -176,49 +181,68 @@ std::optional<std::string> ipv6_to_string(const char* src, size_t len)
   return ss.str();
 }
 
-std::optional<std::string> txt_to_string(const char* src, size_t len)
+boost::optional<std::string> txt_to_string(const char* src, size_t len)
 {
   if (len == 0)
-    return std::nullopt;
+    return boost::none;
   return std::string(src+1, len-1);
 }
 
-void ub_ctx_deleter::operator()(ub_ctx* ctx) {
-  ub_ctx_delete(ctx);
-}
-
-namespace {
-
-struct ub_result_deleter {
-  void operator()(ub_result* result) {
-    ub_resolve_free(result);
+// custom smart pointer.
+// TODO: see if std::auto_ptr and the like support custom destructors
+template<typename type, void (*freefunc)(type*)>
+class scoped_ptr
+{
+public:
+  scoped_ptr():
+    ptr(nullptr)
+  {
   }
+  scoped_ptr(type *p):
+    ptr(p)
+  {
+  }
+  ~scoped_ptr()
+  {
+    freefunc(ptr);
+  }
+  operator type *() { return ptr; }
+  type **operator &() { return &ptr; }
+  type *operator->() { return ptr; }
+  operator const type*() const { return &ptr; }
+
+private:
+  type* ptr;
 };
 
-using ub_result_ptr = std::unique_ptr<ub_result, ub_result_deleter>;
+typedef class scoped_ptr<ub_result,ub_resolve_free> ub_result_ptr;
 
-void add_anchors(ub_ctx *ctx)
+struct DNSResolverData
 {
-  for (const char* ds : get_builtin_ds())
-  {
-    MINFO("adding trust anchor: " << *ds);
-    ub_ctx_add_ta(ctx, const_cast<char*>(ds));
-  }
-}
+  ub_ctx* m_ub_context;
+};
 
-} // anonymous namespace
+// work around for bug https://www.nlnetlabs.nl/bugs-script/show_bug.cgi?id=515 needed for it to compile on e.g. Debian 7
+class string_copy {
+public:
+    string_copy(const char *s): str(strdup(s)) {}
+    ~string_copy() { free(str); }
+    operator char*() { return str; }
 
-DNSResolver::DNSResolver()
+public:
+    char *str;
+};
+
+DNSResolver::DNSResolver() : m_data(new DNSResolverData())
 {
   int use_dns_public = 0;
   std::vector<std::string> dns_public_addr;
-  const char *DNS_PUBLIC = getenv("DNS_PUBLIC");
-  if (DNS_PUBLIC)
+  if (auto res = getenv("DNS_PUBLIC"))
   {
-    dns_public_addr = tools::dns_utils::parse_dns_public(DNS_PUBLIC);
+    dns_public_addr = tools::dns_utils::parse_dns_public(res);
     if (!dns_public_addr.empty())
     {
-      MGINFO("Using public DNS server(s): " << tools::join(", ", dns_public_addr) << " (TCP)");
+      MGINFO("Using public DNS server(s): " << boost::join(dns_public_addr, ", ") << " (TCP)");
       use_dns_public = 1;
     }
     else
@@ -228,73 +252,66 @@ DNSResolver::DNSResolver()
   }
 
   // init libunbound context
-  m_ctx = ub_ctx_create();
+  m_data->m_ub_context = ub_ctx_create();
 
   if (use_dns_public)
   {
     for (const auto &ip: dns_public_addr)
-      ub_ctx_set_fwd(m_ctx, ip.c_str());
-    ub_ctx_set_option(m_ctx, "do-udp:", "no");
-    ub_ctx_set_option(m_ctx, "do-tcp:", "yes");
+      ub_ctx_set_fwd(m_data->m_ub_context, string_copy(ip.c_str()));
+    ub_ctx_set_option(m_data->m_ub_context, string_copy("do-udp:"), string_copy("no"));
+    ub_ctx_set_option(m_data->m_ub_context, string_copy("do-tcp:"), string_copy("yes"));
   }
   else {
     // look for "/etc/resolv.conf" and "/etc/hosts" or platform equivalent
-    ub_ctx_resolvconf(m_ctx, NULL);
-    ub_ctx_hosts(m_ctx, NULL);
+    ub_ctx_resolvconf(m_data->m_ub_context, NULL);
+    ub_ctx_hosts(m_data->m_ub_context, NULL);
   }
 
-  add_anchors(m_ctx);
-
-  if (!DNS_PUBLIC)
+  const char * const *ds = ::get_builtin_ds();
+  while (*ds)
   {
-    // TODO(beldex): Don't probe moneropulse for Beldex
-#if 0
-    // if no DNS_PUBLIC specified, we try a lookup to what we know
-    // should be a valid DNSSEC record, and switch to known good
-    // DNSSEC resolvers if verification fails
-    bool available, valid;
-    static const char *probe_hostname = "updates.moneropulse.org";
-    auto records = get_txt_record(probe_hostname, available, valid);
-    if (!valid)
-    {
-      MINFO("Failed to verify DNSSEC record from " << probe_hostname << ", falling back to TCP with well known DNSSEC resolvers");
-      ub_ctx_delete(m_ctx);
-      m_ctx = ub_ctx_create();
-      add_anchors(m_ctx);
-      for (const auto &ip: DEFAULT_DNS_PUBLIC_ADDR)
-        ub_ctx_set_fwd(m_ctx, string_copy(ip));
-      ub_ctx_set_option(m_ctx, string_copy("do-udp:"), string_copy("no"));
-      ub_ctx_set_option(m_ctx, string_copy("do-tcp:"), string_copy("yes"));
-    }
-#endif
+    MINFO("adding trust anchor: " << *ds);
+    ub_ctx_add_ta(m_data->m_ub_context, string_copy(*ds++));
   }
 }
 
-std::vector<std::string> DNSResolver::get_record(const std::string& url, int record_type, std::optional<std::string> (*reader)(const char *,size_t), bool& dnssec_available, bool& dnssec_valid)
+DNSResolver::~DNSResolver()
+{
+  if (m_data)
+  {
+    if (m_data->m_ub_context != NULL)
+    {
+      ub_ctx_delete(m_data->m_ub_context);
+    }
+    delete m_data;
+  }
+}
+
+std::vector<std::string> DNSResolver::get_record(const std::string& url, int record_type, boost::optional<std::string> (*reader)(const char *,size_t), bool& dnssec_available, bool& dnssec_valid)
 {
   std::vector<std::string> addresses;
   dnssec_available = false;
   dnssec_valid = false;
 
-  if (url.find('.') == std::string::npos)
+  if (!check_address_syntax(url.c_str()))
   {
     return addresses;
   }
 
-  ub_result* result_raw = nullptr;
-  // call DNS resolver, blocking.  if return value not zero, something went wrong
-  if (!ub_resolve(m_ctx, url.c_str(), record_type, DNS_CLASS_IN, &result_raw))
-  {
-    // destructor takes care of cleanup
-    ub_result_ptr result{result_raw};
+  // destructor takes care of cleanup
+  ub_result_ptr result;
 
+  // call DNS resolver, blocking.  if return value not zero, something went wrong
+  if (!ub_resolve(m_data->m_ub_context, string_copy(url.c_str()), record_type, DNS_CLASS_IN, &result))
+  {
     dnssec_available = (result->secure || result->bogus);
     dnssec_valid = result->secure && !result->bogus;
     if (result->havedata)
     {
       for (size_t i=0; result->data[i] != NULL; i++)
       {
-        if (auto res = (*reader)(result->data[i], result->len[i]))
+        boost::optional<std::string> res = (*reader)(result->data[i], result->len[i]);
+        if (res)
         {
           MINFO("Found \"" << *res << "\" in " << get_record_name(record_type) << " record for " << url);
           addresses.push_back(*res);
@@ -321,105 +338,9 @@ std::vector<std::string> DNSResolver::get_txt_record(const std::string& url, boo
   return get_record(url, DNS_TYPE_TXT, txt_to_string, dnssec_available, dnssec_valid);
 }
 
-namespace {
-  // Data pack that we pass into the unbound callback:
-  struct dns_results {
-    int& all_done;
-    const std::string& hostname;
-    const char* record_name;
-    std::vector<std::string>& results;
-    std::optional<std::string> (*reader)(const char*, size_t);
-    int async_id{0};
-    bool done{false};
-    bool dnssec;
-    bool dnssec_required;
-
-    dns_results(int& a, const std::string& h, const char* rn, std::vector<std::string>& r, std::optional<std::string> (*rdr)(const char*, size_t), bool dnssec, bool dnssec_req)
-      : all_done{a}, hostname{h}, record_name{rn}, results{r}, reader{rdr}, dnssec{dnssec}, dnssec_required{dnssec_req}
-    {}
-  };
-}
-
-extern "C" void DNSResolver_async_callback(void* data, int err, ub_result* result_raw)
+std::string DNSResolver::get_dns_format_from_oa_address(const std::string& oa_addr)
 {
-  ub_result_ptr result{result_raw};
-  auto &res = *static_cast<dns_results*>(data);
-  res.all_done++;
-  res.done = true;
-  if (err)
-    MWARNING("resolution of " << res.hostname << " failed: " << ub_strerror(err));
-  else if ((res.dnssec || res.dnssec_required) && result->bogus)
-    MWARNING("resolution of " << res.hostname << " failed DNSSEC validation: " << result->why_bogus);
-  else if (res.dnssec_required && !result->secure)
-    MWARNING("resolution of " << res.hostname << " failed: DNSSEC validate is required but is not available");
-  else if (result->havedata)
-  {
-    for (size_t i = 0; result->data[i] != NULL; i++)
-    {
-      if (auto r = (*res.reader)(result->data[i], result->len[i]))
-      {
-        MINFO("Found \"" << *r << "\" in " << res.record_name << " record for " << res.hostname);
-        res.results.push_back(*r);
-      }
-    }
-  }
-}
-
-std::vector<std::vector<std::string>> DNSResolver::get_many(int type, const std::vector<std::string>& hostnames, std::chrono::milliseconds timeout, bool dnssec, bool dnssec_required)
-{
-  auto* reader = type == DNS_TYPE_A ? ipv4_to_string : type == DNS_TYPE_AAAA ? ipv6_to_string : type == DNS_TYPE_TXT ? txt_to_string : nullptr;
-  if (!reader)
-    throw std::invalid_argument("Invalid lookup type: " + std::to_string(type));
-
-  std::vector<std::vector<std::string>> results;
-  if (hostnames.empty())
-    return results;
-
-  int num_done = 0;
-  std::vector<dns_results> result_packs;
-  results.reserve(hostnames.size());
-  result_packs.reserve(hostnames.size());
-  ub_ctx_async(m_ctx, true); // Tells libunbound to use a thread instead of a fork
-
-  // Initiate lookups:
-  for (auto& host : hostnames)
-  {
-    auto& pack = result_packs.emplace_back(num_done, host, get_record_name(type), results.emplace_back(), reader, dnssec, dnssec_required);
-    int err = ub_resolve_async(m_ctx, host.c_str(), type, DNS_CLASS_IN, static_cast<void*>(&pack), DNSResolver_async_callback, &pack.async_id);
-    if (err)
-    {
-      MWARNING("unable to initiate lookup for " << host << ": " << ub_strerror(err));
-      num_done++;
-      pack.done = true;
-    }
-  }
-
-  // Wait for results
-  auto expiry = std::chrono::steady_clock::now() + timeout;
-  while (num_done < (int)results.size() && std::chrono::steady_clock::now() < expiry)
-  {
-    std::this_thread::sleep_for(5ms);
-    int err = ub_process(m_ctx);
-    if (err)
-    {
-      MWARNING("ub_process returned an error while waiting for async results: " << ub_strerror(err));
-      break;
-    }
-  }
-
-  // Cancel any outstanding requests
-  for (auto& pack : result_packs)
-  {
-    if (!pack.done)
-      ub_cancel(m_ctx, pack.async_id);
-  }
-
-  return results;
-}
-
-std::string DNSResolver::get_dns_format_from_oa_address(std::string_view addr_v)
-{
-  std::string addr{addr_v};
+  std::string addr(oa_addr);
   auto first_at = addr.find("@");
   if (first_at == std::string::npos)
     return addr;
@@ -432,6 +353,8 @@ std::string DNSResolver::get_dns_format_from_oa_address(std::string_view addr_v)
 
 DNSResolver& DNSResolver::instance()
 {
+  boost::lock_guard<boost::mutex> lock(instance_lock);
+
   static DNSResolver staticInstance;
   return staticInstance;
 }
@@ -441,34 +364,45 @@ DNSResolver DNSResolver::create()
   return DNSResolver();
 }
 
+bool DNSResolver::check_address_syntax(const char *addr) const
+{
+  // if string doesn't contain a dot, we won't consider it a url for now.
+  if (strchr(addr,'.') == NULL)
+  {
+    return false;
+  }
+  return true;
+}
+
 namespace dns_utils
 {
 
 //-----------------------------------------------------------------------
 // TODO: parse the string in a less stupid way, probably with regex
-std::string address_from_txt_record(std::string_view s)
+std::string address_from_txt_record(const std::string& s)
 {
-  // make sure the txt record has the addr_type and find it
-  constexpr auto addr_type = "oa1:xmr"sv;
-  if (auto pos = s.find(addr_type); pos != std::string_view::npos)
-    s.remove_prefix(pos + addr_type.size()); // remove it and everything before it
-  else
-    return {}; // not found.
-
-  constexpr auto recipient_address = "recipient_address="sv;
-  if (auto pos = s.find(recipient_address); pos != std::string_view::npos)
-    s.remove_prefix(pos + recipient_address.size()); // delete it and everything up to it
-  else
-    return {}; // not found
-
+  // make sure the txt record has "oa1:xmr" and find it
+  auto pos = s.find("oa1:xmr");
+  if (pos == std::string::npos)
+    return {};
+  // search from there to find "recipient_address="
+  pos = s.find("recipient_address=", pos);
+  if (pos == std::string::npos)
+    return {};
+  pos += 18; // move past "recipient_address="
   // find the next semicolon
-  if (auto pos = s.find(';'); pos != std::string::npos)
+  auto pos2 = s.find(";", pos);
+  if (pos2 != std::string::npos)
   {
     // length of address == 95, we can at least validate that much here
-    if (pos == 95)
-      return std::string{s.substr(0, 95)};
-    else if (pos == 106) // length of address == 106 --> integrated address
-      return std::string{s.substr(0, 106)};
+    if (pos2 - pos == 95)
+    {
+      return s.substr(pos, 95);
+    }
+    else if (pos2 - pos == 106) // length of address == 106 --> integrated address
+    {
+      return s.substr(pos, 106);
+    }
   }
   return {};
 }
@@ -486,7 +420,7 @@ std::string address_from_txt_record(std::string_view s)
  *
  * @return a beldex address (as a string) or an empty string
  */
-std::vector<std::string> addresses_from_url(const std::string_view url, bool& dnssec_valid)
+std::vector<std::string> addresses_from_url(const std::string& url, bool& dnssec_valid)
 {
   std::vector<std::string> addresses;
   // get txt records
@@ -507,14 +441,13 @@ std::vector<std::string> addresses_from_url(const std::string_view url, bool& dn
     std::string addr = address_from_txt_record(rec);
     if (addr.size())
     {
-      addresses.push_back(std::move(addr));
+      addresses.push_back(addr);
     }
   }
   return addresses;
 }
 
-std::string get_account_address_as_str_from_url(const std::string_view url, bool& dnssec_valid,
-    std::function<std::string(const std::string_view, const std::vector<std::string>&, bool)> dns_confirm)
+std::string get_account_address_as_str_from_url(const std::string& url, bool& dnssec_valid, std::function<std::string(const std::string&, const std::vector<std::string>&, bool)> dns_confirm)
 {
   // attempt to get address from dns query
   auto addresses = addresses_from_url(url, dnssec_valid);
@@ -558,19 +491,22 @@ bool load_txt_records_from_dns(std::vector<std::string> &good_records, const std
   std::vector<std::vector<std::string> > records;
   records.resize(dns_urls.size());
 
-  size_t first_index = crypto::rand_idx(dns_urls.size());
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<int> dis(0, dns_urls.size() - 1);
+  size_t first_index = dis(gen);
 
   // send all requests in parallel
+  std::vector<boost::thread> threads(dns_urls.size());
   std::deque<bool> avail(dns_urls.size(), false), valid(dns_urls.size(), false);
-  tools::threadpool& tpool = tools::threadpool::getInstance();
-  tools::threadpool::waiter waiter;
   for (size_t n = 0; n < dns_urls.size(); ++n)
   {
-    tpool.submit(&waiter,[n, dns_urls, &records, &avail, &valid](){
+    threads[n] = boost::thread([n, dns_urls, &records, &avail, &valid](){
       records[n] = tools::DNSResolver::instance().get_txt_record(dns_urls[n], avail[n], valid[n]); 
     });
   }
-  waiter.wait(&tpool);
+  for (size_t n = 0; n < dns_urls.size(); ++n)
+    threads[n].join();
 
   size_t cur_index = first_index;
   do
@@ -579,12 +515,12 @@ bool load_txt_records_from_dns(std::vector<std::string> &good_records, const std
     if (!avail[cur_index])
     {
       records[cur_index].clear();
-      LOG_PRINT_L2("DNSSEC not available for hostname: " << url << ", skipping.");
+      LOG_PRINT_L2("DNSSEC not available for checkpoint update at URL: " << url << ", skipping.");
     }
     if (!valid[cur_index])
     {
       records[cur_index].clear();
-      LOG_PRINT_L2("DNSSEC validation failed for hostname: " << url << ", skipping.");
+      LOG_PRINT_L2("DNSSEC validation failed for checkpoint update at URL: " << url << ", skipping.");
     }
 
     cur_index++;
@@ -606,7 +542,7 @@ bool load_txt_records_from_dns(std::vector<std::string> &good_records, const std
 
   if (num_valid_records < 2)
   {
-    LOG_PRINT_L0("WARNING: no two valid DNS TXT records were received");
+    LOG_PRINT_L0("WARNING: no two valid MoneroPulse DNS checkpoint records were received");
     return false;
   }
 
@@ -628,7 +564,7 @@ bool load_txt_records_from_dns(std::vector<std::string> &good_records, const std
 
   if (good_records_index < 0)
   {
-    LOG_PRINT_L0("WARNING: no two DNS TXT records matched");
+    LOG_PRINT_L0("WARNING: no two MoneroPulse DNS checkpoint records matched");
     return false;
   }
 
@@ -641,13 +577,13 @@ std::vector<std::string> parse_dns_public(const char *s)
   unsigned ip0, ip1, ip2, ip3;
   char c;
   std::vector<std::string> dns_public_addr;
-  if (s == "tcp"sv)
+  if (!strcmp(s, "tcp"))
   {
-    for (auto& default_dns : DEFAULT_DNS_PUBLIC_ADDR)
-      dns_public_addr.emplace_back(default_dns);
-    LOG_PRINT_L0("Using default public DNS server(s): " << tools::join(", ", dns_public_addr) << " (TCP)");
+    for (size_t i = 0; i < sizeof(DEFAULT_DNS_PUBLIC_ADDR) / sizeof(DEFAULT_DNS_PUBLIC_ADDR[0]); ++i)
+      dns_public_addr.push_back(DEFAULT_DNS_PUBLIC_ADDR[i]);
+    LOG_PRINT_L0("Using default public DNS server(s): " << boost::join(dns_public_addr, ", ") << " (TCP)");
   }
-  else if (std::sscanf(s, "tcp://%u.%u.%u.%u%c", &ip0, &ip1, &ip2, &ip3, &c) == 4)
+  else if (sscanf(s, "tcp://%u.%u.%u.%u%c", &ip0, &ip1, &ip2, &ip3, &c) == 4)
   {
     if (ip0 > 255 || ip1 > 255 || ip2 > 255 || ip3 > 255)
     {
@@ -655,7 +591,7 @@ std::vector<std::string> parse_dns_public(const char *s)
     }
     else
     {
-      dns_public_addr.emplace_back(s + 6);
+      dns_public_addr.push_back(std::string(s + strlen("tcp://")));
     }
   }
   else

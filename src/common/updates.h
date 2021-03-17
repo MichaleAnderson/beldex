@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018, The Monero Project
+// Copyright (c) 2017-2018, The Monero Project
 // 
 // All rights reserved.
 // 
@@ -26,17 +26,12 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef MONERO_EXCEPTION_H
-#define MONERO_EXCEPTION_H
+#pragma once 
 
 #include <string>
 
 namespace tools
 {
-
-void set_stack_trace_log(const std::string &log);
-void log_stack_trace(const char *msg);
-
-}  // namespace tools
-
-#endif
+  bool check_updates(const std::string &software, const std::string &buildtag, std::string &version, std::string &hash);
+  std::string get_update_url(const std::string &software, const std::string &subdir, const std::string &buildtag, const std::string &version, bool user);
+}

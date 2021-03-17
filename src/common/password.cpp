@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2019, The Monero Project
+// Copyright (c) 2014-2018, The Monero Project
 // 
 // All rights reserved.
 // 
@@ -31,9 +31,7 @@
 #include "password.h"
 
 #include <iostream>
-#include <cstdio>
-#include <utility>
-#include <type_traits>
+#include <stdio.h>
 
 #if defined(_WIN32)
 #include <io.h>
@@ -61,7 +59,7 @@ namespace
 
     DWORD mode_old;
     ::GetConsoleMode(h_cin, &mode_old);
-    DWORD mode_new = mode_old & ~((hide_input ? ENABLE_ECHO_INPUT : 0) | ENABLE_LINE_INPUT);
+    DWORD mode_new = mode_old & ~(hide_input ? ENABLE_ECHO_INPUT : 0);
     ::SetConsoleMode(h_cin, mode_new);
 
     bool r = true;
@@ -80,6 +78,10 @@ namespace
         break;
       }
       else if (ucs2_ch == L'\r')
+      {
+        continue;
+      }
+      else if (ucs2_ch == L'\n')
       {
         std::cout << std::endl;
         break;
@@ -241,14 +243,23 @@ namespace tools
 {
   // deleted via private member
   password_container::password_container() noexcept : m_password() {}
-  password_container::password_container(epee::wipeable_string password) noexcept
-    : m_password{std::move(password)}
+  password_container::password_container(std::string&& password) noexcept
+    : m_password(std::move(password)) 
   {
+  }
+  password_container::password_container(const epee::wipeable_string& password) noexcept
+    : m_password(password)
+  {
+  }
+
+  password_container::~password_container() noexcept
+  {
+    m_password.clear();
   }
 
   std::atomic<bool> password_container::is_prompting(false);
 
-  std::optional<password_container> password_container::prompt(const bool verify, const char *message, bool hide_input)
+  boost::optional<password_container> password_container::prompt(const bool verify, const char *message, bool hide_input)
   {
 #if defined(BELDEX_ENABLE_INTEGRATION_TEST_HOOKS)
     return password_container(std::string(""));
@@ -263,11 +274,11 @@ namespace tools
     }
 
     is_prompting = false;
-    return std::nullopt;
+    return boost::none;
 #endif
   }
 
-  std::optional<login> login::parse(std::string&& userpass, bool verify, const std::function<std::optional<password_container>(bool)> &prompt)
+  boost::optional<login> login::parse(std::string&& userpass, bool verify, const std::function<boost::optional<password_container>(bool)> &prompt)
   {
     login out{};
 
@@ -276,7 +287,7 @@ namespace tools
     {
       auto result = prompt(verify);
       if (!result)
-        return std::nullopt;
+        return boost::none;
 
       out.password = std::move(*result);
     }

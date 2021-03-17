@@ -1,4 +1,4 @@
-// Copyright (c) 2019, The Monero Project
+// Copyright (c) 2018, The Monero Project
 // 
 // All rights reserved.
 // 
@@ -30,7 +30,6 @@
 
 #include <string>
 #include <vector>
-#include "fs.h"
 
 namespace tools
 {
@@ -43,7 +42,7 @@ public:
   int notify(const char *tag, const char *s, ...);
 
 private:
-  fs::path filename;
+  std::string filename;
   std::vector<std::string> args;
 };
 

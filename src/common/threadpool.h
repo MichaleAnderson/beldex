@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019, The Monero Project
+// Copyright (c) 2017-2018, The Monero Project
 //
 // All rights reserved.
 //
@@ -27,15 +27,14 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
+#include <boost/thread/condition_variable.hpp>
+#include <boost/thread/mutex.hpp>
+#include <boost/thread/thread.hpp>
 #include <cstddef>
 #include <functional>
 #include <utility>
 #include <vector>
-#include <deque>
 #include <stdexcept>
-#include <thread>
-#include <mutex>
-#include <condition_variable>
 
 namespace tools
 {
@@ -54,8 +53,8 @@ public:
   // The waiter lets the caller know when all of its
   // tasks are completed.
   class waiter {
-    std::mutex mt;
-    std::condition_variable cv;
+    boost::mutex mt;
+    boost::condition_variable cv;
     int num;
     public:
     void inc();
@@ -70,9 +69,6 @@ public:
   // task to finish.
   void submit(waiter *waiter, std::function<void()> f, bool leaf = false);
 
-  // destroy and recreate threads
-  void recycle();
-
   unsigned int get_max_concurrency() const;
 
   ~threadpool();
@@ -81,17 +77,15 @@ public:
 
   private:
     threadpool(unsigned int max_threads = 0);
-    void destroy();
-    void create(unsigned int max_threads);
     typedef struct entry {
       waiter *wo;
       std::function<void()> f;
       bool leaf;
     } entry;
     std::deque<entry> queue;
-    std::condition_variable has_work;
-    std::mutex mutex;
-    std::vector<std::thread> threads;
+    boost::condition_variable has_work;
+    boost::mutex mutex;
+    std::vector<boost::thread> threads;
     unsigned int active;
     unsigned int max;
     bool running;

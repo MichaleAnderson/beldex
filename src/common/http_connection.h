@@ -1,21 +1,21 @@
-// Copyright (c) 2019, The Beldex Project
-//
+// Copyright (c) 2014-2018, The Monero Project
+// 
 // All rights reserved.
-//
+// 
 // Redistribution and use in source and binary forms, with or without modification, are
 // permitted provided that the following conditions are met:
-//
+// 
 // 1. Redistributions of source code must retain the above copyright notice, this list of
 //    conditions and the following disclaimer.
-//
+// 
 // 2. Redistributions in binary form must reproduce the above copyright notice, this list
 //    of conditions and the following disclaimer in the documentation and/or other
 //    materials provided with the distribution.
-//
+// 
 // 3. Neither the name of the copyright holder nor the names of its contributors may be
 //    used to endorse or promote products derived from this software without specific
 //    prior written permission.
-//
+// 
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
 // EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
 // MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
@@ -26,20 +26,44 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "random.h"
-#include <cassert>
+#pragma once
+
+#include <chrono>
+#include "string_tools.h"
+#include "net/http_client.h"
 
 namespace tools {
 
-thread_local std::mt19937_64 rng{std::random_device{}()};
+class t_http_connection {
+private:
+  epee::net_utils::http::http_simple_client * mp_http_client;
+  bool m_ok;
+public:
+  static constexpr std::chrono::seconds TIMEOUT()
+  {
+    return std::chrono::minutes(3) + std::chrono::seconds(30);
+  }
 
-uint64_t uniform_distribution_portable(std::mt19937_64& rng, const uint64_t n)
-{
-  assert(n > 0);
-  const uint64_t secureMax = rng.max() - rng.max() % n;
-  uint64_t x;
-  do x = rng(); while (x >= secureMax);
-  return  x / (secureMax / n);
-}
+  t_http_connection(epee::net_utils::http::http_simple_client* p_http_client)
+    : mp_http_client(p_http_client)
+    , m_ok(false)
+  {
+    m_ok = mp_http_client->connect(TIMEOUT());
+  }
 
-}
+  ~t_http_connection()
+  {
+    if (m_ok)
+    {
+      try { mp_http_client->disconnect(); }
+      catch (...) { /* do not propagate through dtor */ }
+    }
+  }
+
+  bool is_open() const
+  {
+    return m_ok;
+  }
+}; // class t_http_connection
+
+} // namespace tools

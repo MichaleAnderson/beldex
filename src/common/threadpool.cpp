@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019, The Monero Project
+// Copyright (c) 2017-2018, The Monero Project
 //
 // All rights reserved.
 //
@@ -25,29 +25,29 @@
 // INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#include "epee/misc_log_ex.h"
+#include "misc_log_ex.h"
 #include "common/threadpool.h"
 
 #include "cryptonote_config.h"
 #include "common/util.h"
 
-static thread_local int depth = 0;
-static thread_local bool is_leaf = false;
+static __thread int depth = 0;
+static __thread bool is_leaf = false;
 
 namespace tools
 {
-threadpool::threadpool(unsigned int max_threads) : running(true), active(0) {
-  create(max_threads);
+threadpool::threadpool(unsigned int max_threads) {
+  start(max_threads);
 }
 
 threadpool::~threadpool() {
-  destroy();
+  stop();
 }
 
-void threadpool::destroy() {
+void threadpool::stop() {
   try
   {
-    const std::unique_lock lock{mutex};
+    const boost::unique_lock<boost::mutex> lock(mutex);
     running = false;
     has_work.notify_all();
   }
@@ -63,25 +63,24 @@ void threadpool::destroy() {
     catch (...) { /* ignore */ }
   }
   threads.clear();
+  queue.clear();
 }
 
-void threadpool::recycle() {
-  destroy();
-  create(max);
-}
-
-void threadpool::create(unsigned int max_threads) {
-  const std::unique_lock lock{mutex};
-  max = max_threads ? max_threads : tools::get_max_concurrency();
+void threadpool::start(unsigned int max_threads) {
   running = true;
-  for (size_t i = max ? max : 1; i > 0; i--) {
-    threads.emplace_back([this] { run(false); });
+  active = 0;
+  boost::thread::attributes attrs;
+  attrs.set_stack_size(THREAD_STACK_SIZE);
+  max = max_threads ? max_threads : tools::get_max_concurrency();
+  size_t i = max ? max - 1 : 0;
+  while(i--) {
+    threads.push_back(boost::thread(attrs, boost::bind(&threadpool::run, this, false)));
   }
 }
 
 void threadpool::submit(waiter *obj, std::function<void()> f, bool leaf) {
   CHECK_AND_ASSERT_THROW_MES(!is_leaf, "A leaf routine is using a thread pool");
-  std::unique_lock lock{mutex};
+  boost::unique_lock<boost::mutex> lock(mutex);
   if (!leaf && ((active == max && !queue.empty()) || depth > 0)) {
     // if all available threads are already running
     // and there's work waiting, just run in current thread
@@ -110,7 +109,7 @@ threadpool::waiter::~waiter()
 {
   try
   {
-    std::unique_lock lock{mt};
+    boost::unique_lock<boost::mutex> lock(mt);
     if (num)
       MERROR("wait should have been called before waiter dtor - waiting now");
   }
@@ -128,25 +127,25 @@ threadpool::waiter::~waiter()
 void threadpool::waiter::wait(threadpool *tpool) {
   if (tpool)
     tpool->run(true);
-  std::unique_lock lock{mt};
+  boost::unique_lock<boost::mutex> lock(mt);
   while(num)
     cv.wait(lock);
 }
 
 void threadpool::waiter::inc() {
-  const std::unique_lock lock{mt};
+  const boost::unique_lock<boost::mutex> lock(mt);
   num++;
 }
 
 void threadpool::waiter::dec() {
-  const std::unique_lock lock{mt};
+  const boost::unique_lock<boost::mutex> lock(mt);
   num--;
   if (!num)
     cv.notify_all();
 }
 
 void threadpool::run(bool flush) {
-  std::unique_lock lock{mutex};
+  boost::unique_lock<boost::mutex> lock(mutex);
   while (running) {
     entry e;
     while(queue.empty() && running)
@@ -158,7 +157,7 @@ void threadpool::run(bool flush) {
     if (!running) break;
 
     active++;
-    e = std::move(queue.front());
+    e = queue.front();
     queue.pop_front();
     lock.unlock();
     ++depth;
