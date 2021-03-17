@@ -27,7 +27,7 @@
 # STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-beldex_add_executable(cn_deserialize "beldex-utils-deserialize"
+beldex_add_executable(cn_deserialize "loki-utils-deserialize"
   cn_deserialize.cpp
   )
 
@@ -37,7 +37,7 @@ target_link_libraries(cn_deserialize
     p2p
     extra)
 
-beldex_add_executable(object_sizes "beldex-utils-object-sizes"
+beldex_add_executable(object_sizes "loki-utils-object-sizes"
   object_sizes.cpp
   )
 
@@ -45,20 +45,5 @@ target_link_libraries(object_sizes
   PRIVATE
     lmdb
     p2p
-    cpr::cpr
     extra
     )
-
-set(dns_checks_sources
-  dns_checks.cpp
-  )
-
-beldex_add_executable(dns_checks "beldex-utils-dns-checks" dns_checks.cpp)
-
-target_link_libraries(dns_checks
-    PRIVATE
-    common
-    epee
-    version
-    Boost::program_options
-    Boost::thread)
