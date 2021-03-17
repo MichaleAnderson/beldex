@@ -1,5 +1,4 @@
 # Copyright (c) 2014-2018, The Monero Project
-# 
 # All rights reserved.
 # 
 # Redistribution and use in source and binary forms, with or without modification, are
@@ -26,25 +25,16 @@
 # STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-if (NOT CMAKE_HOST_WIN32)
-  set (CMAKE_SYSTEM_NAME Windows)
-endif()
+MESSAGE(STATUS "Looking for libunbound")
 
-set (GCC_PREFIX i686-w64-mingw32)
-set (CMAKE_C_COMPILER ${GCC_PREFIX}-gcc)
-set (CMAKE_CXX_COMPILER ${GCC_PREFIX}-g++)
-set (CMAKE_AR ar CACHE FILEPATH "" FORCE)
-set (CMAKE_NM nm CACHE FILEPATH "" FORCE)
-set (CMAKE_LINKER ld CACHE FILEPATH "" FORCE)
-#set (CMAKE_RANLIB ${GCC_PREFIX}-gcc-ranlib CACHE FILEPATH "" FORCE)
-set (CMAKE_RC_COMPILER windres)
+FIND_PATH(UNBOUND_INCLUDE_DIR
+  NAMES unbound.h
+  PATH_SUFFIXES include/ include/unbound/
+  PATHS "${PROJECT_SOURCE_DIR}"
+  ${UNBOUND_ROOT}
+  $ENV{UNBOUND_ROOT}
+  /usr/local/
+  /usr/
+)
 
-set (CMAKE_FIND_ROOT_PATH "${MSYS2_FOLDER}/mingw32")
-
-# Ensure cmake doesn't find things in the wrong places
-set (CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER) # Find programs on host
-set (CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY) # Find libs in target
-set (CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY) # Find includes in target
-
-set (MINGW_FLAG "-m32")
-set (USE_LTO_DEFAULT false)
+find_library(UNBOUND_LIBRARIES unbound)

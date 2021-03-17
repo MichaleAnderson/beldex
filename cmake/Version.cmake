@@ -32,19 +32,20 @@ function (write_static_version_header hash)
 endfunction ()
 
 find_package(Git QUIET)
-if (GIT_FOUND OR Git_FOUND)
+if ("$Format:$" STREQUAL "")
+  # We're in a tarball; use hard-coded variables.
+  write_static_version_header("release")
+elseif (GIT_FOUND OR Git_FOUND)
   message(STATUS "Found Git: ${GIT_EXECUTABLE}")
-  set(VERSIONTAG "@VERSIONTAG@") # Will be replaced again by GenVersion.cmake, below.
-  configure_file("${CMAKE_SOURCE_DIR}/src/version.cpp.in" "${CMAKE_BINARY_DIR}/version.cpp.in")
   add_custom_command(
     OUTPUT            "${CMAKE_BINARY_DIR}/version.cpp"
     COMMAND           "${CMAKE_COMMAND}"
                       "-D" "GIT=${GIT_EXECUTABLE}"
-                      "-P" "${CMAKE_SOURCE_DIR}/cmake/GenVersion.cmake"
-    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
-    DEPENDS           "${CMAKE_BINARY_DIR}/version.cpp.in")
+                      "-D" "TO=${CMAKE_BINARY_DIR}/version.cpp"
+                      "-P" "cmake/GenVersion.cmake"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 else()
-  message(WARNING "Git was not found; setting release tag to 'unknown'")
+  message(STATUS "WARNING: Git was not found!")
   write_static_version_header("unknown")
 endif ()
 add_custom_target(genversion ALL
