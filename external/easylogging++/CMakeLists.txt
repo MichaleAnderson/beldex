@@ -45,7 +45,7 @@ target_include_directories(easylogging PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(easylogging
   PRIVATE
     Threads::Threads
-    ${Backtrace_LIBRARIES})
+    Backtrace)
 
 # GUI/libwallet install target
 if (BUILD_GUI_DEPS)
