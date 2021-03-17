@@ -372,7 +372,7 @@ endif()
 # elseif(CMAKE_SYSTEM_NAME MATCHES ".*BSDI.*")
 #   set(BSDI TRUE)
 
-include(cmake/check_for_std_filesystem.cmake)
+#include(cmake/check_for_std_filesystem.cmake)
 
 include_directories(external/rapidjson/include src contrib/epee/include external)
 
@@ -1082,4 +1082,3 @@ option(BUILD_GUI_DEPS "Build GUI dependencies." OFF)
 # This is not nice, distribution packagers should not enable this, but depend
 # on libunbound shipped with their distribution instead
 option(INSTALL_VENDORED_LIBUNBOUND "Install libunbound binary built from source vendored with this repo." OFF)
-
