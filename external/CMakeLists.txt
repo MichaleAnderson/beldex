@@ -40,11 +40,10 @@ endif()
 
 option(WITH_MINIUPNPC "Enable miniupnpc support for IGD NAT hole punching" ${DEFAULT_WITH_MINIUPNPC})
 
-if(NOT STATIC AND NOT BUILD_STATIC_DEPS)
   find_package(PkgConfig REQUIRED)
-  if(WITH_MINIUPNPC)
-    pkg_check_modules(MINIUPNPC miniupnpc>=2.1)
-  endif()
+  
+if(NOT STATIC AND NOT BUILD_STATIC_DEPS)
+  pkg_check_modules(MINIUPNPC miniupnpc>=2.1)
   pkg_check_modules(UNBOUND libunbound)
   pkg_check_modules(LOKIMQ liboxenmq>=1.2.3)
 endif()
