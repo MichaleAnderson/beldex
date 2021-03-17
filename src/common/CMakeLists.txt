@@ -28,14 +28,13 @@
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 add_library(common
-  base32z.cpp
   base58.cpp
   command_line.cpp
   dns_utils.cpp
   download.cpp
   error.cpp
   expect.cpp
-  loki.cpp
+  beldex.cpp
   util.cpp
   i18n.cpp
   rules.cpp
@@ -43,13 +42,11 @@ add_library(common
   password.cpp
   perf_timer.cpp
   pruning.cpp
-  random.cpp
   scoped_message_writer.cpp
   spawn.cpp
   threadpool.cpp
   updates.cpp
   aligned.c
-  timings.cc
   combinator.cpp)
 
 if (STACK_TRACE)
