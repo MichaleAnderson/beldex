@@ -44,7 +44,7 @@ ARG BOOST_VERSION=1_68_0
 ARG BOOST_VERSION_DOT=1.68.0
 ARG BOOST_HASH=7f6130bc3cf65f56a618888ce9d5ea704fa10b462be126ad053e80e553d6d8b7
 RUN set -ex \
-    && curl -s -L -o  boost_${BOOST_VERSION}.tar.bz2 https://dl.bintray.com/boostorg/release/${BOOST_VERSION_DOT}/source/boost_${BOOST_VERSION}.tar.bz2 \
+    && curl -s -L -o  boost_${BOOST_VERSION}.tar.bz2 https://downloads.sourceforge.net/project/boost/boost/${BOOST_VERSION_DOT}/boost_${BOOST_VERSION}.tar.bz2 \
     && echo "${BOOST_HASH}  boost_${BOOST_VERSION}.tar.bz2" | sha256sum -c \
     && tar -xvf boost_${BOOST_VERSION}.tar.bz2 \
     && rm -f boost_${BOOST_VERSION}.tar.bz2 \
@@ -113,14 +113,6 @@ RUN git clone https://github.com/zeromq/libzmq.git -b ${ZMQ_VERSION} \
     && make -j${NPROC} \
     && make install
 
-# zmq.hpp
-ARG CPPZMQ_VERSION=v4.2.3
-ARG CPPZMQ_HASH=6aa3ab686e916cb0e62df7fa7d12e0b13ae9fae6
-RUN git clone https://github.com/zeromq/cppzmq.git -b ${CPPZMQ_VERSION} \
-    && cd cppzmq \
-    && test `git rev-parse HEAD` = ${CPPZMQ_HASH} || exit 1 \
-    && cp *.hpp ${PREFIX}/include
-
 # Sodium
 ARG SODIUM_VERSION=1.0.16
 ARG SODIUM_HASH=675149b9b8b66ff44152553fb3ebf9858128363d
@@ -133,10 +125,25 @@ RUN set -ex \
     && make  -j${NPROC} \
     && make install
 
-ADD . /src
-RUN cd /src \
-    && CMAKE_INCLUDE_PATH="${PREFIX}/include" \
-       CMAKE_LIBRARY_PATH="${PREFIX}/lib" \
-       ANDROID_STANDALONE_TOOLCHAIN_PATH=${TOOLCHAIN_DIR} \
-       USE_SINGLE_BUILDDIR=1 \
-       PATH=${HOST_PATH} make release-static-android-armv8 -j${NPROC}
+RUN set -ex \
+    && apt-get update && apt-get install libsodium-dev libunbound-dev libcurl4-openssl-dev libssl-dev libevent-dev libsqlite3-dev doxygen graphviz -y 
+
+#ADD . /src
+#RUN cd /src \
+#    && CMAKE_INCLUDE_PATH="${PREFIX}/include" \
+#       CMAKE_LIBRARY_PATH="${PREFIX}/lib" \
+#       ANDROID_STANDALONE_TOOLCHAIN_PATH=${TOOLCHAIN_DIR} \
+#       USE_SINGLE_BUILDDIR=1 \
+#       PATH=${HOST_PATH} make release-static-android-armv8 -j${NPROC}
+
+ADD . /opt/android/beldex
+RUN cd /opt/android/beldex \
+      && rm -rf build \
+      && mkdir -p build/release \
+      && ./build-all-arch.sh
+
+
+#ADD . /src
+#RUN cd /src \ 
+#    && mkdir -p build/release \
+#    && ./build-all-arch.sh
