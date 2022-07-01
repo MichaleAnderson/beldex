@@ -1280,6 +1280,7 @@ namespace master_nodes
   {
     std::string_view block_type = alt_block ? "alt block "sv : "block "sv;
     uint64_t height             = cryptonote::get_block_height(block);
+    uint8_t const hf_version       = block.major_version;
     crypto::hash hash           = cryptonote::get_block_hash(block);
 
     if (miner_block)
@@ -1323,8 +1324,8 @@ namespace master_nodes
       // POS. So we relax the rules here for now.
       if (nettype != cryptonote::FAKECHAIN)
       {
-        auto round_begin_timestamp = timings.r0_timestamp + (block.POS.round * POS_ROUND_TIME);
-        auto round_end_timestamp   = round_begin_timestamp + POS_ROUND_TIME;
+        auto round_begin_timestamp = timings.r0_timestamp + (block.POS.round * ((hf_version > cryptonote::network_version_17_POS)?POS_ROUND_TIME_V18 : POS_ROUND_TIME));
+        auto round_end_timestamp   = round_begin_timestamp + ((hf_version > cryptonote::network_version_17_POS)?POS_ROUND_TIME_V18 : POS_ROUND_TIME);
 
         uint64_t begin_time = tools::to_seconds(round_begin_timestamp.time_since_epoch());
         uint64_t end_time   = tools::to_seconds(round_end_timestamp.time_since_epoch());

@@ -122,7 +122,7 @@ target_compile_definitions(uWebSockets INTERFACE UWS_HTTPRESPONSE_NO_WRITEMARK U
 # 3.15+, and we target lower than that (and this is fairly simple to build).
 
 if(NOT BUILD_STATIC_DEPS)
-  find_package(CURL REQUIRED COMPONENTS HTTP HTTPS SSL)
+	find_package(CURL REQUIRED COMPONENTS HTTP HTTPS SSL)
 
   # CURL::libcurl wasn't added to FindCURL until cmake 3.12, so add it if necessary
   if (CMAKE_VERSION VERSION_LESS 3.12 AND NOT TARGET CURL::libcurl)

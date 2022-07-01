@@ -103,7 +103,7 @@ struct timings
 // r0_timestamp: The timestamp that round 0 starts at for the desired block (this timestamp can be calculated via 'POS::get_round_timings').
 // round: (Optional) Set to the round that is currently active when the function returns true.
 // return: False when enough 'time' has elapsed such that POS round has overflowed 255 and POS blocks are no longer possible to generate.
-bool convert_time_to_round(POS::time_point const &time, POS::time_point const &r0_timestamp, uint8_t *round);
+bool convert_time_to_round(POS::time_point const &time, POS::time_point const &r0_timestamp, uint8_t *round , uint8_t hf_version);
 bool get_round_timings(cryptonote::Blockchain const &blockchain, uint64_t height, uint64_t prev_timestamp, POS::timings &times);
 
 } // namespace POS

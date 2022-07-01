@@ -27,6 +27,14 @@ namespace master_nodes {
   constexpr auto POS_WAIT_FOR_RANDOM_VALUE_DURATION               = 10s;
   constexpr auto POS_WAIT_FOR_SIGNED_BLOCK_DURATION               = 10s;
 
+  constexpr auto POS_ROUND_TIME_V18                                    = 20s;
+  constexpr auto POS_WAIT_FOR_HANDSHAKES_DURATION_V18                  = 3s;
+  constexpr auto POS_WAIT_FOR_OTHER_VALIDATOR_HANDSHAKES_DURATION_V18  = 3s;
+  constexpr auto POS_WAIT_FOR_BLOCK_TEMPLATE_DURATION_V18              = 3s;
+  constexpr auto POS_WAIT_FOR_RANDOM_VALUE_HASH_DURATION_V18           = 3s;
+  constexpr auto POS_WAIT_FOR_RANDOM_VALUE_DURATION_V18                = 3s;
+  constexpr auto POS_WAIT_FOR_SIGNED_BLOCK_DURATION_V18                = 5s;
+
   constexpr size_t POS_QUORUM_NUM_VALIDATORS     = 11;
   constexpr size_t POS_BLOCK_REQUIRED_SIGNATURES = 7;  // A block must have exactly N signatures to be considered properly
 #endif
@@ -41,8 +49,16 @@ namespace master_nodes {
                 POS_WAIT_FOR_BLOCK_TEMPLATE_DURATION +
                 POS_WAIT_FOR_RANDOM_VALUE_HASH_DURATION +
                 POS_WAIT_FOR_RANDOM_VALUE_DURATION +
-                POS_WAIT_FOR_SIGNED_BLOCK_DURATION);
+                POS_WAIT_FOR_SIGNED_BLOCK_DURATION);  
+  static_assert(POS_ROUND_TIME_V18 >=
+                POS_WAIT_FOR_HANDSHAKES_DURATION_V18 +
+                POS_WAIT_FOR_OTHER_VALIDATOR_HANDSHAKES_DURATION_V18 +
+                POS_WAIT_FOR_BLOCK_TEMPLATE_DURATION_V18 +
+                POS_WAIT_FOR_RANDOM_VALUE_HASH_DURATION_V18 +
+                POS_WAIT_FOR_RANDOM_VALUE_DURATION_V18 +
+                POS_WAIT_FOR_SIGNED_BLOCK_DURATION_V18);
 
+  
   static_assert(POS_QUORUM_NUM_VALIDATORS >= POS_BLOCK_REQUIRED_SIGNATURES);
   static_assert(POS_QUORUM_ENTROPY_LAG >= POS_QUORUM_SIZE, "We need to pull atleast POS_QUORUM_SIZE number of blocks from the Blockchain, we can't if the amount of blocks to go back from the tip of the Blockchain is less than the blocks we need.");
 

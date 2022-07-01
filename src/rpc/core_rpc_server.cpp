@@ -2912,7 +2912,7 @@ namespace cryptonote { namespace rpc {
       POS::timings next_timings = {};
       uint8_t POS_round         = 0;
       if (POS::get_round_timings(blockchain, curr_height, top_header.timestamp, next_timings) &&
-          POS::convert_time_to_round(POS::clock::now(), next_timings.r0_timestamp, &POS_round))
+          POS::convert_time_to_round(POS::clock::now(), next_timings.r0_timestamp, &POS_round, hf_version))
       {
         auto entropy = master_nodes::get_POS_entropy_for_next_block(blockchain.get_db(), POS_round);
         auto& mn_list = m_core.get_master_node_list();
